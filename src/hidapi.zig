@@ -35,35 +35,44 @@ pub const HidDeviceInfo = struct {
 
 const HIDIOCGRAWINFO = std.os.linux.IOCTL.IOR('H', 0x03, HidRawDevInfo);
 
-// Vendor ID = 0x046d;
-pub fn scanDevices(io: Io, allocator: Allocator, vendor_id: u32) ![]const HidDeviceInfo {
-    var dev = try Io.Dir.cwd().openDir(io, "/dev", .{ .iterate = true });
-    defer dev.close(io);
+const ScanDeviceIterator = struct {
+    dir: Io.Dir,
+    dir_it: Io.Dir.Iterator,
 
-    var devices: ArrayList(HidDeviceInfo) = .empty;
-    var it = dev.iterate();
-    while (try it.next(io)) |entry| {
-        if (entry.kind == .character_device and std.mem.startsWith(u8, entry.name, "hidraw")) {
-            const full_path = try std.fmt.allocPrint(allocator, "/dev/{s}", .{entry.name});
-            defer allocator.free(full_path);
-
-            const file = Io.Dir.cwd().openFile(io, full_path, .{ .mode = .read_only }) catch continue;
-            defer file.close(io);
-
-            var info: HidRawDevInfo = undefined;
-            const rc = std.posix.system.ioctl(file.handle, HIDIOCGRAWINFO, @intFromPtr(&info));
-            if (rc < 0) continue;
-
-            const vid: u16 = @bitCast(info.vendor);
-            const pid: u16 = @bitCast(info.product);
-
-            if (vendor_id != vid) continue;
-
-            try devices.append(allocator, try .init(allocator, full_path, vid, pid));
-        }
+    pub fn init(io: Io, path: []const u8) !@This() {
+        var dir = try Io.Dir.cwd().openDir(io, path, .{ .iterate = true });
+        return .{ .dir = dir, .dir_it = dir.iterate() };
     }
 
-    return devices.toOwnedSlice(allocator);
+    pub fn deinit(self: *@This(), io: Io) void {
+        self.dir.close(io);
+        self.* = undefined;
+    }
+
+    pub fn next(self: *@This(), io: Io, allocator: Allocator) !?HidDeviceInfo {
+        return while (try self.dir_it.next(io)) |entry| {
+            if (entry.kind == .character_device and std.mem.startsWith(u8, entry.name, "hidraw")) {
+                const full_path = try std.fmt.allocPrint(allocator, "/dev/{s}", .{entry.name});
+                defer allocator.free(full_path);
+
+                const file = Io.Dir.cwd().openFile(io, full_path, .{ .mode = .read_only }) catch continue;
+                defer file.close(io);
+
+                var info: HidRawDevInfo = undefined;
+                const rc = std.posix.system.ioctl(file.handle, HIDIOCGRAWINFO, @intFromPtr(&info));
+                if (rc < 0) continue;
+
+                const vid: u16 = @bitCast(info.vendor);
+                const pid: u16 = @bitCast(info.product);
+
+                return try .init(allocator, full_path, vid, pid);
+            }
+        } else null;
+    }
+};
+
+pub fn scanDevices(io: Io) !ScanDeviceIterator {
+    return .init(io, "/dev");
 }
 
 test "HidDeviceInfo.deinit frees the memory" {
