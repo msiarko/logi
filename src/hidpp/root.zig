@@ -1,6 +1,9 @@
 const std = @import("std");
 const mem = std.mem;
 const Io = std.Io;
+const builtin = @import("builtin");
+const linux_impl = @import("linux.zig");
+const windows_impl = @import("windows.zig");
 
 pub const HidMessageHeader = extern struct {
     report_id: u8,
@@ -28,6 +31,10 @@ pub const HidShortMessage = extern struct {
         .header = .init(0x10),
         .params = mem.zeroes([3]u8),
     };
+
+    pub fn toBytes(self: @This()) [@sizeOf(@This())]u8 {
+        return mem.toBytes(self);
+    }
 };
 
 pub const HidLongMessage = extern struct {
@@ -38,29 +45,38 @@ pub const HidLongMessage = extern struct {
         .header = .init(0x11),
         .params = mem.zeroes([16]u8),
     };
+
+    pub fn toBytes(self: @This()) [@sizeOf(@This())]u8 {
+        return mem.toBytes(self);
+    }
 };
 
 pub const HidMessage = union(enum) {
-    short: *const HidShortMessage,
-    long: *const HidLongMessage,
+    short: HidShortMessage,
+    long: HidLongMessage,
 
     pub fn init(bytes: []const u8) !@This() {
         if (bytes.len == 0)
             return error.EmptyBytesSlice;
 
         return switch (bytes[0]) {
-            0x10, 0x02 => .{ .short = mem.bytesAsValue(HidShortMessage, bytes) },
-            0x11, 0x03 => .{ .long = mem.bytesAsValue(HidLongMessage, bytes) },
+            0x10, 0x02 => .{ .short = mem.bytesToValue(HidShortMessage, bytes) },
+            0x11, 0x03 => .{ .long = mem.bytesToValue(HidLongMessage, bytes) },
             else => error.UnknownReportId,
         };
     }
+};
 
-    pub fn asBytes(self: @This()) []const u8 {
-        return switch (self) {
-            .short => |s| mem.asBytes(s),
-            .long => |l| mem.asBytes(l),
-        };
-    }
+const Read = switch (builtin.os.tag) {
+    .windows => @TypeOf(windows_impl.read),
+    .linux => @TypeOf(linux_impl.read),
+    else => @compileError("Unsupported platform"),
+};
+
+const Write = switch (builtin.os.tag) {
+    .windows => @TypeOf(windows_impl.write),
+    .linux => @TypeOf(linux_impl.write),
+    else => @compileError("Unsupported platform"),
 };
 
 pub const HidDevice = struct {
@@ -68,7 +84,11 @@ pub const HidDevice = struct {
 
     pub fn init(io: Io, path: []const u8) !@This() {
         return .{
-            .file = try Io.Dir.cwd().openFile(io, path, .{ .mode = .read_write }),
+            .file = try Io.Dir.cwd().openFile(
+                io,
+                path,
+                .{ .mode = .read_write },
+            ),
         };
     }
 
@@ -78,13 +98,25 @@ pub const HidDevice = struct {
     }
 
     pub fn read(self: *@This(), buf: []u8) !HidMessage {
-        const bytes_read = std.os.linux.read(self.file.handle, @ptrCast(buf), buf.len);
-        return .init(buf[0..bytes_read]);
+        return switch (builtin.os.tag) {
+            .windows => windows_impl.read(self.file.handle, buf),
+            .linux => linux_impl.read(self.file.handle, buf),
+            else => unreachable,
+        };
     }
 
     pub fn write(self: *@This(), msg: HidMessage) !void {
-        const bytes = msg.asBytes();
-        const written = std.os.linux.write(self.file.handle, @ptrCast(bytes), bytes.len);
+        const bytes: []const u8 = switch (msg) {
+            .short => |s| &s.toBytes(),
+            .long => |l| &l.toBytes(),
+        };
+
+        const written = switch (builtin.os.tag) {
+            .windows => try windows_impl.write(self.file.handle, bytes),
+            .linux => try linux_impl.write(self.file.handle, bytes),
+            else => unreachable,
+        };
+
         std.debug.assert(bytes.len == written);
     }
 };
@@ -122,13 +154,12 @@ test "HidDevice reads from a file" {
     short.params[0] = 1;
     short.params[1] = 2;
     short.params[2] = 3;
-    const test_msg: HidMessage = .{ .short = &short };
     var test_file = try Io.Dir.cwd().createFile(std.testing.io, test_file_path, .{ .read = true });
     defer Io.Dir.cwd().deleteFile(std.testing.io, test_file_path) catch {};
 
     var buf: [64]u8 = undefined;
     var writer = test_file.writer(std.testing.io, &buf);
-    try writer.interface.writeAll(test_msg.asBytes());
+    try writer.interface.writeAll(&short.toBytes());
     try writer.flush();
     test_file.close(std.testing.io);
 
@@ -137,7 +168,7 @@ test "HidDevice reads from a file" {
     defer hid.deinit(std.testing.io);
 
     const msg = try hid.read(&msg_buf);
-    try std.testing.expectEqualSlices(u8, test_msg.asBytes(), msg.asBytes());
+    try std.testing.expectEqualSlices(u8, &short.toBytes(), &msg.short.toBytes());
 }
 
 test "HidDevice writes to a file" {
@@ -146,7 +177,7 @@ test "HidDevice writes to a file" {
     long.params[0] = 1;
     long.params[1] = 2;
     long.params[2] = 3;
-    const test_msg: HidMessage = .{ .long = &long };
+    const test_msg: HidMessage = .{ .long = long };
     var test_file = try Io.Dir.cwd().createFile(std.testing.io, test_file_path, .{ .read = true });
     defer {
         test_file.close(std.testing.io);
@@ -163,5 +194,5 @@ test "HidDevice writes to a file" {
     var file_reader = test_file.reader(std.testing.io, &buf);
     const bytes_read = try file_reader.interface.readSliceShort(&r_buf);
     try std.testing.expectEqual(@sizeOf(HidLongMessage), bytes_read);
-    try std.testing.expectEqualSlices(u8, test_msg.asBytes(), r_buf[0..bytes_read]);
+    try std.testing.expectEqualSlices(u8, &long.toBytes(), r_buf[0..bytes_read]);
 }

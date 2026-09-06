@@ -1,7 +1,8 @@
 const std = @import("std");
 const Io = std.Io;
 const Allocator = std.mem.Allocator;
-const ArrayList = std.ArrayList;
+const root = @import("root.zig");
+const HidDeviceInfo = root.HidDeviceInfo;
 
 const HidRawDevInfo = extern struct {
     bustype: u32,
@@ -9,38 +10,14 @@ const HidRawDevInfo = extern struct {
     product: i16,
 };
 
-pub const HidDeviceInfo = struct {
-    path: []const u8,
-    vendor: u16,
-    product: u16,
-
-    fn init(
-        allocator: Allocator,
-        path: []const u8,
-        vendor: u16,
-        product: u16,
-    ) !@This() {
-        return .{
-            .path = try allocator.dupe(u8, path),
-            .vendor = vendor,
-            .product = product,
-        };
-    }
-
-    pub fn deinit(self: *@This(), allocator: Allocator) void {
-        allocator.free(self.path);
-        self.* = undefined;
-    }
-};
-
 const HIDIOCGRAWINFO = std.os.linux.IOCTL.IOR('H', 0x03, HidRawDevInfo);
 
-const ScanDeviceIterator = struct {
+pub const LinuxScanDeviceIterator = struct {
     dir: Io.Dir,
     dir_it: Io.Dir.Iterator,
 
-    pub fn init(io: Io, path: []const u8) !@This() {
-        var dir = try Io.Dir.cwd().openDir(io, path, .{ .iterate = true });
+    pub fn init(io: Io) !@This() {
+        var dir = try Io.Dir.cwd().openDir(io, "/dev", .{ .iterate = true });
         return .{ .dir = dir, .dir_it = dir.iterate() };
     }
 
@@ -59,7 +36,7 @@ const ScanDeviceIterator = struct {
                 defer file.close(io);
 
                 var info: HidRawDevInfo = undefined;
-                const rc = std.posix.system.ioctl(file.handle, HIDIOCGRAWINFO, @intFromPtr(&info));
+                const rc = std.os.linux.ioctl(file.handle, HIDIOCGRAWINFO, @intFromPtr(&info));
                 if (rc < 0) continue;
 
                 const vid: u16 = @bitCast(info.vendor);
@@ -70,10 +47,6 @@ const ScanDeviceIterator = struct {
         } else null;
     }
 };
-
-pub fn scanDevices(io: Io) !ScanDeviceIterator {
-    return .init(io, "/dev");
-}
 
 test "HidDeviceInfo.deinit frees the memory" {
     const allocator = std.testing.allocator;

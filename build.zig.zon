@@ -2,7 +2,6 @@
     .name = .logi,
     .version = "0.0.1",
     .fingerprint = 0xded3f26cc104b7c, // Changing this has security and trust implications.
-    .minimum_zig_version = "0.17.0-dev.1857+3c46da14d",
     .dependencies = .{},
     .paths = .{
         "build.zig",
