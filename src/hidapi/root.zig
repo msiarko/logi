@@ -6,26 +6,31 @@ const linux_impl = @import("linux.zig");
 const windows_impl = @import("windows.zig");
 
 pub const HidDeviceInfo = struct {
-    path: []const u8,
+    const max_path_len = 256;
+
+    path: [max_path_len]u8,
+    path_len: usize,
     vendor: u16,
     product: u16,
 
     pub fn init(
-        allocator: Allocator,
         path: []const u8,
         vendor: u16,
         product: u16,
     ) !@This() {
-        return .{
-            .path = try allocator.dupe(u8, path),
+        var self: @This() = .{
+            .path = undefined,
+            .path_len = @min(max_path_len, path.len),
             .vendor = vendor,
             .product = product,
         };
+
+        @memcpy(self.path[0..self.path_len], path[0..self.path_len]);
+        return self;
     }
 
-    pub fn deinit(self: *@This(), allocator: Allocator) void {
-        allocator.free(self.path);
-        self.* = undefined;
+    pub fn getPath(self: *const @This()) []const u8 {
+        return self.path[0..self.path_len];
     }
 };
 

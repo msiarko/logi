@@ -171,7 +171,6 @@ pub const WinScanDeviceIterator = struct {
             defer allocator.free(utf8_path);
 
             return HidDeviceInfo.init(
-                allocator,
                 utf8_path,
                 attrs.VendorID,
                 attrs.ProductID,

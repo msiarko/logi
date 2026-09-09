@@ -4,6 +4,7 @@ const Io = std.Io;
 const builtin = @import("builtin");
 const linux_impl = @import("linux.zig");
 const windows_impl = @import("windows.zig");
+const HidDeviceInfo = @import("../hidapi/root.zig").HidDeviceInfo;
 
 pub const HidMessageHeader = extern struct {
     report_id: u8,
@@ -51,9 +52,19 @@ pub const HidLongMessage = extern struct {
     }
 };
 
+pub const RawMessage = struct {
+    bytes: [32]u8,
+    len: usize,
+
+    pub fn asSlice(self: *const @This()) []const u8 {
+        return self.bytes[0..self.len];
+    }
+};
+
 pub const HidMessage = union(enum) {
     short: HidShortMessage,
     long: HidLongMessage,
+    raw: RawMessage,
 
     pub fn init(bytes: []const u8) !@This() {
         if (bytes.len == 0)
@@ -62,7 +73,11 @@ pub const HidMessage = union(enum) {
         return switch (bytes[0]) {
             0x10, 0x02 => .{ .short = mem.bytesToValue(HidShortMessage, bytes) },
             0x11, 0x03 => .{ .long = mem.bytesToValue(HidLongMessage, bytes) },
-            else => error.UnknownReportId,
+            else => {
+                var msg: RawMessage = .{ .bytes = undefined, .len = @min(32, bytes.len) };
+                @memcpy(msg.bytes[0..msg.len], bytes[0..msg.len]);
+                return .{ .raw = msg };
+            },
         };
     }
 };
@@ -81,15 +96,33 @@ const Write = switch (builtin.os.tag) {
 
 pub const HidDevice = struct {
     file: Io.File,
+    info: HidDeviceInfo,
 
-    pub fn init(io: Io, path: []const u8) !@This() {
+    pub fn init(io: Io, info: HidDeviceInfo) !@This() {
         return .{
             .file = try Io.Dir.cwd().openFile(
                 io,
-                path,
+                info.getPath(),
                 .{ .mode = .read_write },
             ),
+            .info = info,
         };
+    }
+
+    pub fn cancel(self: *@This()) void {
+        switch (builtin.os.tag) {
+            .windows => {
+                const win = std.os.windows;
+                const CancelIoEx = struct {
+                    extern "kernel32" fn CancelIoEx(hFile: win.HANDLE, lpOverlapped: ?*anyopaque) callconv(.winapi) win.BOOL;
+                }.CancelIoEx;
+                _ = CancelIoEx(self.file.handle, null);
+            },
+            .linux => {
+                // Not supported, file reads might block until unblocked or closed
+            },
+            else => unreachable,
+        }
     }
 
     pub fn deinit(self: *@This(), io: Io) void {
@@ -109,6 +142,7 @@ pub const HidDevice = struct {
         const bytes: []const u8 = switch (msg) {
             .short => |s| &s.toBytes(),
             .long => |l| &l.toBytes(),
+            .raw => |r| &r.asSlice(),
         };
 
         const written = switch (builtin.os.tag) {

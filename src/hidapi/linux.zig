@@ -47,10 +47,3 @@ pub const LinuxScanDeviceIterator = struct {
         } else null;
     }
 };
-
-test "HidDeviceInfo.deinit frees the memory" {
-    const allocator = std.testing.allocator;
-    const device_name = "/dev/hiddevice";
-    var device: HidDeviceInfo = try .init(allocator, device_name, 0, 1);
-    device.deinit(allocator);
-}
