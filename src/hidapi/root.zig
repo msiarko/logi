@@ -44,6 +44,24 @@ pub fn scanDevices(io: Io) !HidDeviceInfoIterator {
     return .init(io);
 }
 
+test "HidDeviceInfo.init and getPath" {
+    const path = "test/path/to/device";
+    const info = try HidDeviceInfo.init(path, 0x1234, 0x5678);
+    
+    try std.testing.expectEqual(0x1234, info.vendor);
+    try std.testing.expectEqual(0x5678, info.product);
+    try std.testing.expectEqualSlices(u8, path, info.getPath());
+}
+
+test "HidDeviceInfo.init truncates long path" {
+    var long_path: [300]u8 = undefined;
+    @memset(&long_path, 'A');
+    
+    const info = try HidDeviceInfo.init(&long_path, 0, 0);
+    try std.testing.expectEqual(256, info.getPath().len);
+    try std.testing.expectEqualSlices(u8, long_path[0..256], info.getPath());
+}
+
 test {
     if (builtin.os.tag == .windows) {
         _ = std.testing.refAllDecls(windows_impl);

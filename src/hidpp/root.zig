@@ -142,7 +142,7 @@ pub const HidDevice = struct {
         const bytes: []const u8 = switch (msg) {
             .short => |s| &s.toBytes(),
             .long => |l| &l.toBytes(),
-            .raw => |r| &r.asSlice(),
+            .raw => |r| r.asSlice(),
         };
 
         const written = switch (builtin.os.tag) {
@@ -182,6 +182,45 @@ test "HidLongMessage.init returns a valid initialized message" {
     try std.testing.expectEqualSlices(u8, &expected, &msg.params);
 }
 
+test "HidMessage.init returns error on empty slice" {
+    try std.testing.expectError(error.EmptyBytesSlice, HidMessage.init(&.{}));
+}
+
+test "HidMessage.init parses short message" {
+    var bytes: [@sizeOf(HidShortMessage)]u8 = std.mem.zeroes([@sizeOf(HidShortMessage)]u8);
+    bytes[0] = 0x10;
+    bytes[1] = 0x01; // device index
+    
+    const msg = try HidMessage.init(&bytes);
+    try std.testing.expectEqual(.short, std.meta.activeTag(msg));
+    try std.testing.expectEqual(0x10, msg.short.header.report_id);
+    try std.testing.expectEqual(0x01, msg.short.header.device_index);
+}
+
+test "HidMessage.init parses long message" {
+    var bytes: [@sizeOf(HidLongMessage)]u8 = std.mem.zeroes([@sizeOf(HidLongMessage)]u8);
+    bytes[0] = 0x11;
+    bytes[1] = 0x02; // device index
+    
+    const msg = try HidMessage.init(&bytes);
+    try std.testing.expectEqual(.long, std.meta.activeTag(msg));
+    try std.testing.expectEqual(0x11, msg.long.header.report_id);
+    try std.testing.expectEqual(0x02, msg.long.header.device_index);
+}
+
+test "HidMessage.init parses raw message" {
+    const bytes = [_]u8{ 0x05, 0x01, 0x02, 0x03 };
+    const msg = try HidMessage.init(&bytes);
+    try std.testing.expectEqual(.raw, std.meta.activeTag(msg));
+    try std.testing.expectEqual(4, msg.raw.len);
+    try std.testing.expectEqualSlices(u8, &bytes, msg.raw.asSlice());
+}
+
+fn createTestDevice(io: Io, path: []const u8) !HidDevice {
+    const info = try HidDeviceInfo.init(path, 0, 0);
+    return HidDevice.init(io, info);
+}
+
 test "HidDevice reads from a file" {
     const test_file_path = "r_temp";
     var short: HidShortMessage = .init;
@@ -198,7 +237,7 @@ test "HidDevice reads from a file" {
     test_file.close(std.testing.io);
 
     var msg_buf: [message_buffer_size]u8 = undefined;
-    var hid: HidDevice = try .init(std.testing.io, test_file_path);
+    var hid: HidDevice = try createTestDevice(std.testing.io, test_file_path);
     defer hid.deinit(std.testing.io);
 
     const msg = try hid.read(&msg_buf);
@@ -218,7 +257,7 @@ test "HidDevice writes to a file" {
         Io.Dir.cwd().deleteFile(std.testing.io, test_file_path) catch {};
     }
 
-    var hid: HidDevice = try .init(std.testing.io, test_file_path);
+    var hid: HidDevice = try createTestDevice(std.testing.io, test_file_path);
     defer hid.deinit(std.testing.io);
 
     try hid.write(test_msg);
@@ -229,4 +268,19 @@ test "HidDevice writes to a file" {
     const bytes_read = try file_reader.interface.readSliceShort(&r_buf);
     try std.testing.expectEqual(@sizeOf(HidLongMessage), bytes_read);
     try std.testing.expectEqualSlices(u8, &long.toBytes(), r_buf[0..bytes_read]);
+}
+
+test "HidDevice.cancel doesn't crash" {
+    const test_file_path = "c_temp";
+    var test_file = try Io.Dir.cwd().createFile(std.testing.io, test_file_path, .{ .read = true });
+    defer {
+        test_file.close(std.testing.io);
+        Io.Dir.cwd().deleteFile(std.testing.io, test_file_path) catch {};
+    }
+    
+    var hid: HidDevice = try createTestDevice(std.testing.io, test_file_path);
+    defer hid.deinit(std.testing.io);
+
+    // Call cancel just to ensure it doesn't crash or behave improperly on the handle
+    hid.cancel();
 }
