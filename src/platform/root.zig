@@ -13,18 +13,22 @@ const Global = struct {
 
     pub const init: @This() = .{};
 
+    pub fn anyActiveDevices(self: *const @This()) bool {
+        return self.active_devices_count > 0;
+    }
+
     pub fn maxActiveDevicesReached(self: *const @This()) bool {
         return self.active_devices_count >= self.active_devices.len;
     }
 
-    pub fn registerDevice(self: *@This(), io: Io, info: HidDeviceInfo) !*HidDevice {
+    pub fn initDevice(self: *@This(), io: Io, info: HidDeviceInfo) !*HidDevice {
         const hd = &self.active_devices[self.active_devices_count];
         hd.* = try HidDevice.init(io, info);
         self.active_devices_count += 1;
         return hd;
     }
 
-    pub fn deinit(self: *@This(), io: Io) void {
+    pub fn deinitDevices(self: *@This(), io: Io) void {
         for (self.active_devices[0..self.active_devices_count]) |*hd| {
             hd.cancel();
             hd.deinit(io);
@@ -63,22 +67,20 @@ pub fn run(io: Io, allocator: std.mem.Allocator) !void {
         if (device_info.vendor == 0x046d) {
             if (global.maxActiveDevicesReached()) continue;
 
-            const hd = global.registerDevice(io, device_info) catch continue;
-            tasks.async(
+            const hd = global.initDevice(io, device_info) catch continue;
+            tasks.async(io, read, .{
                 io,
-                read,
-                .{
-                    io,
-                    &mutex,
-                    writer,
-                    hd,
-                },
-            );
+                &mutex,
+                writer,
+                hd,
+            });
         }
     }
 
+    if (!global.anyActiveDevices()) return;
+
     try global.cancel_event.wait(io);
-    global.deinit(io);
+    global.deinitDevices(io);
 }
 
 fn read(
