@@ -109,18 +109,10 @@ pub const HidDevice = struct {
         };
     }
 
-    pub fn cancel(self: *@This()) void {
+    pub fn cancel(self: *const @This()) void {
         switch (builtin.os.tag) {
-            .windows => {
-                const win = std.os.windows;
-                const CancelIoEx = struct {
-                    extern "kernel32" fn CancelIoEx(hFile: win.HANDLE, lpOverlapped: ?*anyopaque) callconv(.winapi) win.BOOL;
-                }.CancelIoEx;
-                _ = CancelIoEx(self.file.handle, null);
-            },
-            .linux => {
-                // Not supported, file reads might block until unblocked or closed
-            },
+            .windows => windows_impl.cancel(self.file.handle),
+            .linux => {},
             else => unreachable,
         }
     }

@@ -60,3 +60,10 @@ pub fn write(handle: win.HANDLE, bytes: []const u8) !usize {
 
     return @intCast(bytes_written);
 }
+
+pub fn cancel(handle: win.HANDLE) void {
+    const CancelIoEx = struct {
+        extern "kernel32" fn CancelIoEx(hFile: win.HANDLE, lpOverlapped: ?*anyopaque) callconv(.winapi) win.BOOL;
+    }.CancelIoEx;
+    _ = CancelIoEx(handle, null);
+}
