@@ -27,6 +27,8 @@ extern "kernel32" fn WriteFile(
     lpOverlapped: ?*OVERLAPPED,
 ) callconv(.winapi) win.BOOL;
 
+extern "kernel32" fn CancelIoEx(hFile: win.HANDLE, lpOverlapped: ?*anyopaque) callconv(.winapi) win.BOOL;
+
 pub fn read(handle: win.HANDLE, buf: []u8) !HidMessage {
     var bytes_read: win.DWORD = 0;
     const result = ReadFile(
@@ -62,8 +64,5 @@ pub fn write(handle: win.HANDLE, bytes: []const u8) !usize {
 }
 
 pub fn cancel(handle: win.HANDLE) void {
-    const CancelIoEx = struct {
-        extern "kernel32" fn CancelIoEx(hFile: win.HANDLE, lpOverlapped: ?*anyopaque) callconv(.winapi) win.BOOL;
-    }.CancelIoEx;
     _ = CancelIoEx(handle, null);
 }
