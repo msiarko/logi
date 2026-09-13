@@ -2,9 +2,10 @@ const std = @import("std");
 const builtin = @import("builtin");
 const Io = std.Io;
 
-const logi = @import("logi");
-const HidDevice = logi.hidpp.HidDevice;
-const HidDeviceInfo = logi.hidapi.HidDeviceInfo;
+const hidpp = @import("../hidpp/root.zig");
+const hidapi = @import("../hidapi/root.zig");
+const HidDevice = hidpp.HidDevice;
+const HidDeviceInfo = hidapi.HidDeviceInfo;
 
 const Global = struct {
     active_devices: [8]HidDevice = undefined,
@@ -56,7 +57,7 @@ pub fn run(io: Io, allocator: std.mem.Allocator) !void {
     var writer = &stdout_writer.interface;
     defer writer.flush() catch {};
 
-    var devices_info = try logi.scanDevices(io);
+    var devices_info = try hidapi.scanDevices(io);
     defer devices_info.deinit(io);
 
     var mutex: Io.Mutex = .init;
@@ -105,4 +106,9 @@ fn read(
         writer.print("Path: {s}; Message: 0x{X}\n", .{ hd.info.getPath(), bytes }) catch return Io.Cancelable.Canceled;
         writer.flush() catch return Io.Cancelable.Canceled;
     }
+}
+
+test {
+    _ = std.testing.refAllDecls(hidapi);
+    _ = std.testing.refAllDecls(hidpp);
 }
