@@ -102,7 +102,7 @@ pub const HidDevice = struct {
         return .{
             .file = try Io.Dir.cwd().openFile(
                 io,
-                info.getPath(),
+                info.path.asSlice(),
                 .{ .mode = .read_write },
             ),
             .info = info,

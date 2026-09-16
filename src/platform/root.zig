@@ -103,7 +103,7 @@ fn read(
         try mutex.lock(io);
         defer mutex.unlock(io);
 
-        writer.print("Path: {s}; Message: 0x{X}\n", .{ hd.info.getPath(), bytes }) catch return Io.Cancelable.Canceled;
+        writer.print("Path: {s}; Message: 0x{X}\n", .{ hd.info.path.asSlice(), bytes }) catch return Io.Cancelable.Canceled;
         writer.flush() catch return Io.Cancelable.Canceled;
     }
 }
