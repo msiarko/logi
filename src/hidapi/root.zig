@@ -6,7 +6,13 @@ const linux_impl = @import("linux.zig");
 const windows_impl = @import("windows.zig");
 
 pub const PathBuf = struct {
-    const max_path_len = 260;
+    const max_path_len = switch (builtin.os.tag) {
+        .windows => std.os.windows.MAX_PATH,
+        // too much for the linux device path,
+        // but let's leave this for now
+        .linux => std.os.linux.PATH_MAX,
+        else => @compileError("Unsupported OS"),
+    };
 
     buf: [max_path_len]u8 = undefined,
     len: usize = 0,
